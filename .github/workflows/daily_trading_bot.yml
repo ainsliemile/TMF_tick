@@ -2,15 +2,15 @@ name: TMF Daily Quant Bot
 
 on:
   schedule:
-    # 每天傍晚 18:00 自動下載資料 (UTC 10:00 = 台灣 18:00)
-    - cron: '0 10 * * 1-5'
-    # 每天早上 00:30 (UTC) = 台灣早上 08:30 自動跑參數並寄信
+    # 每天早上 08:30 執行 (台灣時間 08:30 = UTC 00:30)
     - cron: '30 0 * * 1-5'
-  workflow_dispatch: # 支援手動點擊觸發
+  workflow_dispatch:
+  repository_dispatch:
+    types: [trigger_bot]
 
 jobs:
   run-bot:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: 1. 簽出專案程式碼
         uses: actions/checkout@v3
@@ -24,18 +24,18 @@ jobs:
         run: |
           pip install pandas numpy yfinance requests
 
-      - name: 4. 執行每日任務
+      - name: 4. 執行每日任務 (下載昨日資料 + 最佳化 + 寄信)
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
         run: |
           python scripts/daily_bot_pipeline.py
-          
-      - name: 5. 將最新資料存回 GitHub
+
+      - name: 5. 將最新累積的資料存回 GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "自動更新 TMF 歷史資料" || echo "今天沒有新資料"
+          git add data/TMF_tick.csv
+          git commit -m "自動更新 TMF 歷史資料庫" || echo "資料無變動"
           git push
