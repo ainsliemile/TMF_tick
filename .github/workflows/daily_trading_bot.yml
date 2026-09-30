@@ -31,3 +31,11 @@ jobs:
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
         run: |
           python scripts/daily_bot_pipeline.py
+          
+      - name: 5. 將最新資料存回 GitHub
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "自動更新 TMF 歷史資料" || echo "今天沒有新資料"
+          git push
