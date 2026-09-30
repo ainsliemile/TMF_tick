@@ -10,46 +10,35 @@ from email.mime.multipart import MIMEMultipart
 import yfinance as yf
 import itertools
 
-print("=== 🚀 啟動 TMF 微台全自動量化大腦 (內建結算週避險) ===")
+print("=== 🚀 啟動 TMF 微台早盤全自動量化大腦 ===")
 
 # ==========================================
 # 0. 輔助函式：判斷是否為期貨結算週危險期
 # ==========================================
 def is_settlement_danger_week(date_obj):
-    """
-    台指期結算日為每個月的第三個星期三。
-    我們定義危險期為：該週的星期一到星期三（結算日當天）。
-    這段期間價差扭曲嚴重、雜訊最大，直接避開不做。
-    """
     year = date_obj.year
     month = date_obj.month
-    
-    # 找當月第一天
     first_day = dt.date(year, month, 1)
-    # 算第一個星期三 (weekday: Monday=0, Wednesday=2)
     days_to_wed = (2 - first_day.weekday() + 7) % 7
     first_wed = first_day + dt.timedelta(days=days_to_wed)
-    # 第三個星期三 = 第一個星期三 + 2 週
     third_wed = first_wed + dt.timedelta(weeks=2)
-    
-    # 結算當週的星期一 (third_wed 往前推 2 天)
     settlement_monday = third_wed - dt.timedelta(days=2)
-    # 結算日當天 (星期三)
     settlement_day = third_wed
-    
-    # 如果當天落在 星期一 ~ 星期三 之間，視為結算週危險期
     return settlement_monday <= date_obj <= settlement_day
 
 # ==========================================
-# 1. 下載並更新期交所「今日」Tick 資料
+# 1. 自動下載「昨天」期交所 Tick 資料並累積
 # ==========================================
 os.makedirs('data', exist_ok=True)
 csv_path = 'data/TMF_tick.csv'
-today_utc = dt.datetime.utcnow() + dt.timedelta(hours=8)
-date_str = today_utc.strftime("%Y_%m_%d")
+
+# 取得台灣時間的「昨天」
+now_utc = dt.datetime.utcnow() + dt.timedelta(hours=8)
+yesterday = now_utc.date() - dt.timedelta(days=1)
+date_str = yesterday.strftime("%Y_%m_%d")
 
 url = f"https://www.taifex.com.tw/file/taifex/Dailydownload/DailydownloadCSV/Daily_{date_str}.zip"
-print(f"嘗試下載: {url}")
+print(f"嘗試下載昨日資料: {url}")
 
 try:
     res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
@@ -77,14 +66,16 @@ try:
                             df_combined.to_csv(csv_path, index=False, encoding='utf-8-sig')
                         else:
                             df_tmf.to_csv(csv_path, index=False, encoding='utf-8-sig')
-                        print("✅ 今日資料更新完成。")
+                        print("✅ 昨日 TMF 資料成功存入歷史資料庫！")
+    else:
+                        print("⚠️ 昨日無 TMF 交易紀錄或為假日。")
 except Exception as e:
-    print(f"⚠️ 下載或更新資料失敗 (可能為假日): {e}")
+    print(f"⚠️ 下載昨日資料失敗 (可能為假日): {e}")
 
 # ==========================================
-# 2. 核心大腦：過濾結算週、計算最佳參數
+# 2. 核心大腦：過濾結算週、計算近 30 天最佳參數
 # ==========================================
-print("🧠 開始計算近 30 天最佳參數 (已自動排除結算週)...")
+print("🧠 開始計算近 30 天最佳參數...")
 best_long = {'entry': 20, 'tp': 30, 'sl': 100, 'pnl': 0, 'win_rate': 0} 
 best_short = {'entry': 40, 'tp': 50, 'sl': 100, 'pnl': 0, 'win_rate': 0}
 
@@ -100,7 +91,6 @@ if os.path.exists(csv_path):
     df['成交時間'] = df['成交時間'].astype(int)
     df['交易日期'] = pd.to_datetime(df['交易日期'].astype(str).str.strip(), format='%Y%m%d').dt.date
 
-    # 濾除結算週危險期的日子
     df = df[~df['交易日期'].apply(is_settlement_danger_week)].copy()
 
     df_day = df[(df['成交時間'] >= 84500) & (df['成交時間'] <= 134500)].copy()
@@ -115,8 +105,8 @@ if os.path.exists(csv_path):
         
     df_day = df_day.sort_values(['交易日期', '成交時間']).reset_index(drop=True)
 
-    start_dl = recent_dates[0] - dt.timedelta(days=7) if recent_dates else today_utc.date() - dt.timedelta(days=30)
-    sox_raw = yf.download('^SOX', start=start_dl, end=today_utc.date() + dt.timedelta(days=2), progress=False)
+    start_dl = recent_dates[0] - dt.timedelta(days=7) if recent_dates else now_utc.date() - dt.timedelta(days=30)
+    sox_raw = yf.download('^SOX', start=start_dl, end=now_utc.date() + dt.timedelta(days=2), progress=False)
     sox_close = sox_raw['Close'].iloc[:, 0] if isinstance(sox_raw.columns, pd.MultiIndex) else sox_raw['Close']
     sox_df = pd.DataFrame({'SOX_Close': sox_close}).dropna()
     sox_df['sox_ret'] = sox_df['SOX_Close'].pct_change() * 100
@@ -211,14 +201,14 @@ except:
     last_sox_ret = 0
 
 email_content = f"""
-【TMF 微台早盤全自動量化訊號 (過濾結算週)】
-運算基準: 根據近期過濾結算週後的 30 個交易日滾動最佳化
+【TMF 微台早盤全自動量化訊號】
+運算日期: {now_utc.strftime('%Y-%m-%d')} (已排除結算週雜訊)
 
 1. 【美股動態】
    - 昨夜費半指數: {sox_trend} (幅: {last_sox_ret:.2f}%)
    
 2. 【今日動態掛單建議 (08:43準備)】
-   - 若台指期開盤與費半同向，且今天「不是」結算週一至週三，請參考最佳化參數：
+   - 若台指期開盤與費半同向，且今天非結算週，請參考最佳化參數：
    
    🔵 【做多策略】(若費半漲、台指開高)
      * 買進限價：[開盤價 - {best_long['entry']} 點]
@@ -233,8 +223,7 @@ email_content = f"""
      (回測勝率: {best_short['win_rate']}%, 淨利: {best_short['pnl']}元)
 
 3. 【特別提醒】
-   - 結算週避險：若本週剛好遇到每個月第三個星期三的結算日（週一至週三），系統會自動提醒您避開。
-   - 時間防守：若至 09:06:00 尚未觸及停利損，請立即市價平倉。
+   - 務必執行 09:06 時間防守機制（未成交或未觸及停利損一律市價平倉）。
 """
 
 sender_user = os.environ.get('GMAIL_USER')
@@ -245,7 +234,7 @@ if sender_user and sender_pass and receiver:
     msg = MIMEMultipart()
     msg['From'] = sender_user
     msg['To'] = receiver
-    msg['Subject'] = f"【微台策略】{today_utc.strftime('%Y-%m-%d')} 最佳化掛單點位(已避開結算週)"
+    msg['Subject'] = f"【微台策略】{now_utc.strftime('%Y-%m-%d')} 盤前掛單點位"
     msg.attach(MIMEText(email_content, 'plain', 'utf-8'))
     
     try:
@@ -254,7 +243,7 @@ if sender_user and sender_pass and receiver:
         server.login(sender_user, sender_pass)
         server.sendmail(sender_user, receiver, msg.as_string())
         server.quit()
-        print("✅ 郵件發送成功！")
+        print("✅ 盤前策略郵件發送成功！")
     except Exception as e:
         print(f"❌ 寄信失敗: {e}")
 else:
