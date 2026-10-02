@@ -30,7 +30,7 @@ def is_settlement_danger_week(date_obj):
 # 1. 自動下載「昨天」期交所 Tick 資料並累積
 # ==========================================
 os.makedirs('data', exist_ok=True)
-csv_path = 'data/TMF_tick.csv'
+csv_path = 'data/TMF_tick.csv.gz'
 
 # 取得台灣時間的「昨天」
 now_utc = dt.datetime.utcnow() + dt.timedelta(hours=8)
@@ -63,9 +63,9 @@ try:
                             if '成交日期' in df_old.columns:
                                 df_old.rename(columns={'成交日期': '交易日期'}, inplace=True)
                             df_combined = pd.concat([df_old, df_tmf]).drop_duplicates()
-                            df_combined.to_csv(csv_path, index=False, encoding='utf-8-sig')
+                            df_combined.to_csv(csv_path, index=False, encoding='utf-8-sig', compression='gzip')
                         else:
-                            df_tmf.to_csv(csv_path, index=False, encoding='utf-8-sig')
+                            df_tmf.to_csv(csv_path, index=False, encoding='utf-8-sig', compression='gzip')
                         print("✅ 昨日 TMF 資料成功存入歷史資料庫！")
     else:
                         print("⚠️ 昨日無 TMF 交易紀錄或為假日。")
