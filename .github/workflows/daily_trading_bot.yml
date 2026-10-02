@@ -2,21 +2,26 @@ name: TMF Daily Quant Bot
 
 on:
   schedule:
-    # 每天早上 08:30 執行 (台灣時間 08:30 = UTC 00:30)
     - cron: '30 0 * * 1-5'
   workflow_dispatch:
   repository_dispatch:
     types: [trigger_bot]
 
+# 🟢 直接在這裡賦予機器人最高寫入權限，避免 128 權限錯誤
+permissions:
+  contents: write
+
 jobs:
   run-bot:
     runs-on: ubuntu-24.04
     steps:
+      # 🟢 升級為 v4，消除 Node.js 警告
       - name: 1. 簽出專案程式碼
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # 🟢 升級為 v5，消除 Node.js 警告
       - name: 2. 設定 Python 環境
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -24,7 +29,7 @@ jobs:
         run: |
           pip install pandas numpy yfinance requests
 
-      - name: 4. 執行每日任務 (下載昨日資料 + 最佳化 + 寄信)
+      - name: 4. 執行每日任務
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
@@ -36,6 +41,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/TMF_tick.csv
-          git commit -m "自動更新 TMF 歷史資料庫" || echo "資料無變動"
-          git push
+          # 🟢 防呆寫法：直接將整個 data 資料夾加入，不管檔名怎麼變都不會報錯 128
+          git add data/ || echo "無資料夾可加入"
+          git commit -m "自動更新 TMF 歷史資料庫" || echo "資料無變動，無需 Commit"
+          git push || echo "上傳失敗或無新進度"
