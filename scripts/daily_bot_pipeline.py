@@ -27,50 +27,55 @@ def is_settlement_danger_week(date_obj):
     return settlement_monday <= date_obj <= settlement_day
 
 # ==========================================
-# 1. 自動下載「昨天」期交所 Tick 資料並累積
+# 1. 自動尋找並下載「最近一個交易日」資料
 # ==========================================
 os.makedirs('data', exist_ok=True)
-csv_path = 'data/TMF_tick.csv.gz'
+csv_path = 'data/TMF_tick.csv.gz' # 確保副檔名為 .gz
 
-# 取得台灣時間的「昨天」
 now_utc = dt.datetime.utcnow() + dt.timedelta(hours=8)
-yesterday = now_utc.date() - dt.timedelta(days=1)
-date_str = yesterday.strftime("%Y_%m_%d")
 
-url = f"https://www.taifex.com.tw/file/taifex/Dailydownload/DailydownloadCSV/Daily_{date_str}.zip"
-print(f"嘗試下載昨日資料: {url}")
-
-try:
-    res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-    if res.status_code == 200:
-        with zipfile.ZipFile(io.BytesIO(res.content)) as z:
-            filename = z.namelist()[0]
-            with z.open(filename) as f:
-                df_daily = pd.read_csv(f, encoding='big5', dtype=str, on_bad_lines='skip')
-                df_daily.columns = [str(c).strip() for c in df_daily.columns]
-                
-                if '成交日期' in df_daily.columns:
-                    df_daily.rename(columns={'成交日期': '交易日期'}, inplace=True)
-                
-                if '商品代號' in df_daily.columns:
-                    df_tmf = df_daily[df_daily['商品代號'].str.strip() == 'TMF'].copy()
-                    if '到期月份(週別)' in df_tmf.columns:
-                        df_tmf = df_tmf[~df_tmf['到期月份(週別)'].astype(str).str.contains('/')]
+# 最多往前推 5 天尋找檔案 (完美避開六日與連續假期)
+for days_back in range(1, 6):
+    target_date = now_utc.date() - dt.timedelta(days=days_back)
+    date_str = target_date.strftime("%Y_%m_%d")
+    url = f"https://www.taifex.com.tw/file/taifex/Dailydownload/DailydownloadCSV/Daily_{date_str}.zip"
+    print(f"嘗試尋找資料: {date_str}...")
+    
+    try:
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        if res.status_code == 200:
+            print(f"✅ 找到最近交易日 {date_str}，開始下載與處理...")
+            with zipfile.ZipFile(io.BytesIO(res.content)) as z:
+                filename = z.namelist()[0]
+                with z.open(filename) as f:
+                    df_daily = pd.read_csv(f, encoding='big5', dtype=str, on_bad_lines='skip')
+                    df_daily.columns = [str(c).strip() for c in df_daily.columns]
                     
-                    if not df_tmf.empty:
-                        if os.path.exists(csv_path):
-                            df_old = pd.read_csv(csv_path, dtype=str)
-                            if '成交日期' in df_old.columns:
-                                df_old.rename(columns={'成交日期': '交易日期'}, inplace=True)
-                            df_combined = pd.concat([df_old, df_tmf]).drop_duplicates()
-                            df_combined.to_csv(csv_path, index=False, encoding='utf-8-sig', compression='gzip')
-                        else:
-                            df_tmf.to_csv(csv_path, index=False, encoding='utf-8-sig', compression='gzip')
-                        print("✅ 昨日 TMF 資料成功存入歷史資料庫！")
-    else:
-                        print("⚠️ 昨日無 TMF 交易紀錄或為假日。")
-except Exception as e:
-    print(f"⚠️ 下載昨日資料失敗 (可能為假日): {e}")
+                    if '成交日期' in df_daily.columns:
+                        df_daily.rename(columns={'成交日期': '交易日期'}, inplace=True)
+                    
+                    if '商品代號' in df_daily.columns:
+                        df_tmf = df_daily[df_daily['商品代號'].str.strip() == 'TMF'].copy()
+                        if '到期月份(週別)' in df_tmf.columns:
+                            df_tmf = df_tmf[~df_tmf['到期月份(週別)'].astype(str).str.contains('/')]
+                        
+                        if not df_tmf.empty:
+                            if os.path.exists(csv_path):
+                                df_old = pd.read_csv(csv_path, dtype=str)
+                                if '成交日期' in df_old.columns:
+                                    df_old.rename(columns={'成交日期': '交易日期'}, inplace=True)
+                                # 透過 drop_duplicates 自動過濾重複寫入的資料
+                                df_combined = pd.concat([df_old, df_tmf]).drop_duplicates()
+                                df_combined.to_csv(csv_path, index=False, encoding='utf-8-sig', compression='gzip')
+                            else:
+                                df_tmf.to_csv(csv_path, index=False, encoding='utf-8-sig', compression='gzip')
+                            print(f"✅ {date_str} TMF 資料成功存入歷史資料庫！")
+                            
+            break # 🟢 成功合併最近一天的資料後，就直接中斷迴圈，進入下一步參數運算
+        else:
+            print(f"⚠️ {date_str} 網站無檔案 (可能為假日)，繼續往前找...")
+    except Exception as e:
+        print(f"⚠️ 請求 {date_str} 失敗: {e}")
 
 # ==========================================
 # 2. 核心大腦：過濾結算週、計算近 30 天最佳參數
