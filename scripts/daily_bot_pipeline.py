@@ -139,9 +139,9 @@ if os.path.exists(csv_path):
             day_records.append({'dir': direction, 'open': open_p, 'prices': prices, 'times': times})
 
     def find_best_params(direction_filter):
-        ENTRY_DISTS = [10, 20, 30, 40, 50, 60, 70, 80]
-        TP_DISTS = [10, 20, 30, 40, 50, 60, 70, 80]
-        SL_DISTS = [80, 90, 100, 110, 120, 130]
+        ENTRY_DISTS = [10, 20, 30, 40, 50, 60, 70, 80, 90,100]
+        TP_DISTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        SL_DISTS = [80, 90, 100, 110, 120, 130, 140, 150, 160]
         days = [d for d in day_records if d['dir'] == direction_filter]
         if not days: return None
         
